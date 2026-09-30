@@ -25,6 +25,21 @@ h1,h2,h3,p{margin:0}.muted{color:var(--muted)}.small{font-size:12px}.actions{dis
 .status{font-size:12px}.online{color:var(--success)}.offline{color:var(--danger)}
 @media(max-width:850px){.stats{grid-template-columns:repeat(2,1fr)}.layout{grid-template-columns:1fr}}
 @media(max-width:520px){.app{padding:14px}.stats{grid-template-columns:1fr 1fr}.task{grid-template-columns:auto 1fr auto}.task .delete{grid-column:2}.top{align-items:flex-start;flex-direction:column}}
+
+
+.calendar-box{background:white;border-radius:16px;padding:18px;width:min(1050px,100%);max-height:92vh;overflow:auto}
+.calendar-head{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-bottom:10px}
+.calendar-title{text-align:center;font-size:20px;font-weight:700;margin:8px 0 12px}
+.calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border-top:1px solid var(--border);border-left:1px solid var(--border)}
+.calendar-grid>div{min-height:110px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);padding:7px}
+.weekdays>div{min-height:auto;text-align:center;font-size:12px;font-weight:700;color:var(--muted);padding:8px}
+.day.other{background:#fafafa;color:#a1a1aa}.day.today{background:#eef2ff}
+.day-number{font-size:12px;font-weight:700;margin-bottom:5px}
+.calendar-task{font-size:11px;padding:5px 6px;margin:4px 0;border-radius:6px;background:#f1f5f9;border-left:3px solid var(--accent);cursor:grab;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.calendar-task.high{border-left-color:#dc2626}.calendar-task.medium{border-left-color:#ca8a04}.calendar-task.low{border-left-color:#6b7280}
+.calendar-task.done{opacity:.5;text-decoration:line-through}
+.day.drop-target{outline:2px dashed var(--accent);outline-offset:-2px}
+@media(max-width:650px){.calendar-box{padding:10px}.calendar-grid>div{min-height:82px;padding:4px}.calendar-task{font-size:10px}.calendar-head{align-items:flex-start;flex-direction:column}}
 </style>
 </head>
 <body>
@@ -37,6 +52,7 @@ h1,h2,h3,p{margin:0}.muted{color:var(--muted)}.small{font-size:12px}.actions{dis
 </div>
 <div class="actions">
 <button class="btn" id="loginBtn">Sign in</button>
+<button class="btn" id="calendarBtn">📅 Calendar</button>
 <button class="btn primary" id="addBtn">+ Add task</button>
 </div>
 </header>
@@ -81,14 +97,35 @@ h1,h2,h3,p{margin:0}.muted{color:var(--muted)}.small{font-size:12px}.actions{dis
 
 <div class="modal" id="modal">
 <div class="modal-box">
-<h2>Add task</h2>
+<h2 id="modalTitle">Add task</h2>
 <form class="form" id="taskForm">
 <label>Task<input class="input" id="taskTitle" required placeholder="e.g. Review Keeper HR permissions"></label>
 <label>Project<select class="select" id="taskProject"><option>Support</option><option>Keeper</option><option>Intune</option><option>OpenDental</option><option>Projects</option></select></label>
 <label>Priority<select class="select" id="taskPriority"><option>High</option><option selected>Medium</option><option>Low</option></select></label>
 <label>Due date<input class="input" id="taskDue" type="date"></label>
-<div class="actions"><button type="button" class="btn" id="cancelBtn">Cancel</button><button class="btn primary" type="submit">Create task</button></div>
+<label>Status<select class="select" id="taskStatus"><option value="open">Open</option><option value="done">Done</option></select></label>
+<div class="actions"><button type="button" class="btn" id="cancelBtn">Cancel</button><button class="btn primary" type="submit" id="saveTaskBtn">Create task</button></div>
 </form>
+</div>
+</div>
+
+<div class="modal" id="calendarModal">
+<div class="calendar-box">
+<div class="calendar-head">
+<div>
+<h2>Task Calendar</h2>
+<p class="small muted">Drag a task to another day to reschedule it.</p>
+</div>
+<div class="actions">
+<button class="btn" id="prevMonth" type="button">‹</button>
+<button class="btn" id="todayMonth" type="button">Today</button>
+<button class="btn" id="nextMonth" type="button">›</button>
+<button class="btn" id="closeCalendar" type="button">Close</button>
+</div>
+</div>
+<div class="calendar-title" id="calendarTitle"></div>
+<div class="calendar-grid weekdays"><div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div></div>
+<div class="calendar-grid" id="calendarGrid"></div>
 </div>
 </div>
 
@@ -132,93 +169,151 @@ const monthlyGoals=[
 "October monthly review"
 ];
 
-let auth,db,user=null,unsubscribeTasks=null,tasks=[],goals=monthlyGoals.map((title,i)=>({id:"goal-"+i,title,done:false}));
+let auth,db,user=null,unsubscribeTasks=null,tasks=[],editingId=null,calendarDate=new Date();
 const $=id=>document.getElementById(id);
 const today=()=>new Date().toISOString().slice(0,10);
 $("dateLabel").textContent=new Date().toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric",year:"numeric"});
 
-function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));}
+function escapeHtml(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));}
+function dateKey(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;}
 
 function render(){
-const filter=$("projectFilter").value;
-const visible=tasks.filter(t=>filter==="all"||t.project===filter);
-$("taskList").innerHTML=visible.length?visible.map(t=>`
-<div class="task ${t.done?"done":""}">
-<input class="checkbox" type="checkbox" data-toggle="${t.id}" ${t.done?"checked":""}>
-<div><div class="title">${escapeHtml(t.title)}</div>
-<div class="meta"><span class="pill">${escapeHtml(t.project)}</span><span class="pill ${t.priority.toLowerCase()}">${escapeHtml(t.priority)}</span>${t.dueDate?`<span class="pill">Due ${escapeHtml(t.dueDate)}</span>`:""}</div></div>
-<button class="btn small" data-edit="${t.id}" type="button">Edit</button>
-<button class="btn danger small delete" data-delete="${t.id}" type="button">Delete</button>
-</div>`).join(""):`<div class="empty">No tasks here. Suspiciously peaceful.</div>`;
+ const filter=$("projectFilter").value;
+ const visible=tasks.filter(t=>filter==="all"||t.project===filter);
+ $("taskList").innerHTML=visible.length?visible.map(t=>`
+ <div class="task ${t.done?"done":""}">
+ <input class="checkbox" type="checkbox" data-toggle="${t.id}" ${t.done?"checked":""}>
+ <div><div class="title">${escapeHtml(t.title)}</div>
+ <div class="meta"><span class="pill">${escapeHtml(t.project)}</span><span class="pill ${String(t.priority).toLowerCase()}">${escapeHtml(t.priority)}</span>${t.dueDate?`<span class="pill">Due ${escapeHtml(t.dueDate)}</span>`:""}</div></div>
+ <button class="btn small" data-edit="${t.id}" type="button">Edit</button>
+ <button class="btn danger small delete" data-delete="${t.id}" type="button">Delete</button>
+ </div>`).join(""):`<div class="empty">No tasks here. Suspiciously peaceful.</div>`;
 
-$("goalList").innerHTML=goals.map(g=>`
-<label class="goal goal-row"><input class="checkbox" type="checkbox" data-goal="${g.id}" ${g.done?"checked":""}>
-<span class="${g.done?"title":""}">${escapeHtml(g.title)}</span><span class="pill">${g.done?"Done":"Open"}</span></label>`).join("");
+ $("goalList").innerHTML=goals.map(g=>`
+ <label class="goal goal-row"><input class="checkbox" type="checkbox" data-goal="${g.id}" ${g.done?"checked":""}>
+ <span class="${g.done?"title":""}">${escapeHtml(g.title)}</span><span class="pill">${g.done?"Done":"Open"}</span></label>`).join("");
 
-const done=tasks.filter(t=>t.done).length,total=tasks.length,gd=goals.filter(g=>g.done).length;
-$("todayStat").textContent=`${done} / ${total}`;
-$("dayProgress").style.width=total?`${done/total*100}%`:"0%";
-$("monthStat").textContent=`${goals.length?Math.round(gd/goals.length*100):0}%`;
-$("monthProgress").style.width=`${goals.length?gd/goals.length*100:0}%`;
-$("overdueStat").textContent=tasks.filter(t=>!t.done&&t.dueDate&&t.dueDate<today()).length;
-$("focusStat").textContent=tasks.find(t=>!t.done)?.project||"Done";
+ const done=tasks.filter(t=>t.done).length,total=tasks.length,gd=goals.filter(g=>g.done).length;
+ $("todayStat").textContent=`${done} / ${total}`;
+ $("dayProgress").style.width=total?`${done/total*100}%`:"0%";
+ $("monthStat").textContent=`${goals.length?Math.round(gd/goals.length*100):0}%`;
+ $("monthProgress").style.width=`${goals.length?gd/goals.length*100:0}%`;
+ $("overdueStat").textContent=tasks.filter(t=>!t.done&&t.dueDate&&t.dueDate<today()).length;
+ $("focusStat").textContent=tasks.find(t=>!t.done)?.project||"Done";
+ renderCalendar();
+}
+
+function openTaskModal(task=null){
+ editingId=task?.id||null;
+ $("modalTitle").textContent=task?"Edit task":"Add task";
+ $("saveTaskBtn").textContent=task?"Save changes":"Create task";
+ $("taskTitle").value=task?.title||"";
+ $("taskProject").value=task?.project||"Support";
+ $("taskPriority").value=task?.priority||"Medium";
+ $("taskDue").value=task?.dueDate||"";
+ $("taskStatus").value=task?.done?"done":"open";
+ $("modal").classList.add("open");$("taskTitle").focus();
+}
+function closeTaskModal(){$("modal").classList.remove("open");editingId=null;}
+
+async function saveTask(){
+ const data={title:$("taskTitle").value.trim(),project:$("taskProject").value,priority:$("taskPriority").value,dueDate:$("taskDue").value,done:$("taskStatus").value==="done"};
+ if(!data.title)return;
+ if(user){
+   if(editingId) await updateDoc(doc(db,"users",user.uid,"tasks",editingId),data);
+   else await addDoc(collection(db,"users",user.uid,"tasks"),{...data,createdAt:serverTimestamp()});
+ }else{
+   if(editingId){const t=tasks.find(x=>x.id===editingId);if(t)Object.assign(t,data);}
+   else tasks.push({...data,id:crypto.randomUUID()});
+   render();
+ }
+ closeTaskModal();
+}
+
+function renderCalendar(){
+ const y=calendarDate.getFullYear(),m=calendarDate.getMonth();
+ $("calendarTitle").textContent=calendarDate.toLocaleDateString(undefined,{month:"long",year:"numeric"});
+ const first=new Date(y,m,1),start=new Date(y,m,1-first.getDay());
+ const grid=$("calendarGrid");grid.innerHTML="";
+ for(let i=0;i<42;i++){
+   const d=new Date(start);d.setDate(start.getDate()+i);
+   const key=dateKey(d),cell=document.createElement("div");
+   cell.className="day"+(d.getMonth()!==m?" other":"")+(key===today()?" today":"");
+   cell.dataset.date=key;
+   cell.innerHTML=`<div class="day-number">${d.getDate()}</div>`;
+   tasks.filter(t=>t.dueDate===key).forEach(t=>{
+     const el=document.createElement("div");
+     el.className=`calendar-task ${String(t.priority).toLowerCase()} ${t.done?"done":""}`;
+     el.draggable=true;el.dataset.task=t.id;
+     el.textContent=t.title;
+     el.title="Click to edit • Drag to move";
+     el.addEventListener("click",()=>openTaskModal(tasks.find(x=>x.id===t.id)));
+     el.addEventListener("dragstart",e=>{e.dataTransfer.setData("text/task-id",t.id);});
+     cell.appendChild(el);
+   });
+   cell.addEventListener("dragover",e=>{e.preventDefault();cell.classList.add("drop-target")});
+   cell.addEventListener("dragleave",()=>cell.classList.remove("drop-target"));
+   cell.addEventListener("drop",async e=>{
+     e.preventDefault();cell.classList.remove("drop-target");
+     const id=e.dataTransfer.getData("text/task-id"),t=tasks.find(x=>x.id===id);if(!t)return;
+     if(user)await updateDoc(doc(db,"users",user.uid,"tasks",id),{dueDate:key});
+     else{t.dueDate=key;render();}
+   });
+   grid.appendChild(cell);
+ }
 }
 
 $("projectFilter").addEventListener("change",render);
-$("addBtn").addEventListener("click",()=>{$("modal").classList.add("open");$("taskTitle").focus();});
-$("cancelBtn").addEventListener("click",()=>{$("modal").classList.remove("open");});
-$("modal").addEventListener("click",e=>{if(e.target===$("modal"))$("modal").classList.remove("open");});
+$("addBtn").addEventListener("click",()=>openTaskModal());
+$("cancelBtn").addEventListener("click",closeTaskModal);
+$("modal").addEventListener("click",e=>{if(e.target===$("modal"))closeTaskModal()});
+$("taskForm").addEventListener("submit",async e=>{e.preventDefault();await saveTask();});
 
-$("taskForm").addEventListener("submit",async e=>{
-e.preventDefault();
-const task={title:$("taskTitle").value.trim(),project:$("taskProject").value,priority:$("taskPriority").value,dueDate:$("taskDue").value,done:false};
-if(!task.title)return;
-if(user)await addDoc(collection(db,"users",user.uid,"tasks"),{...task,createdAt:serverTimestamp()});
-else{task.id=crypto.randomUUID();tasks.push(task);render();}
-e.target.reset();$("modal").classList.remove("open");
-});
+$("calendarBtn").addEventListener("click",()=>{$("calendarModal").classList.add("open");renderCalendar()});
+$("closeCalendar").addEventListener("click",()=>$("calendarModal").classList.remove("open"));
+$("calendarModal").addEventListener("click",e=>{if(e.target===$("calendarModal"))$("calendarModal").classList.remove("open")});
+$("prevMonth").addEventListener("click",()=>{calendarDate.setMonth(calendarDate.getMonth()-1);renderCalendar()});
+$("nextMonth").addEventListener("click",()=>{calendarDate.setMonth(calendarDate.getMonth()+1);renderCalendar()});
+$("todayMonth").addEventListener("click",()=>{calendarDate=new Date();renderCalendar()});
 
 $("taskList").addEventListener("click",async e=>{
-const del=e.target.closest("[data-delete]"),edit=e.target.closest("[data-edit]");
-if(del){const id=del.dataset.delete;if(user)await deleteDoc(doc(db,"users",user.uid,"tasks",id));else{tasks=tasks.filter(t=>t.id!==id);render();}}
-if(edit){const t=tasks.find(x=>x.id===edit.dataset.edit);if(!t)return;const title=prompt("Task name:",t.title);if(title===null||!title.trim())return;if(user)await updateDoc(doc(db,"users",user.uid,"tasks",t.id),{title:title.trim()});else{t.title=title.trim();render();}}
+ const del=e.target.closest("[data-delete]"),edit=e.target.closest("[data-edit]");
+ if(del){const id=del.dataset.delete;if(user)await deleteDoc(doc(db,"users",user.uid,"tasks",id));else{tasks=tasks.filter(t=>t.id!==id);render()}}
+ if(edit){const t=tasks.find(x=>x.id===edit.dataset.edit);if(t)openTaskModal(t)}
 });
-
 $("taskList").addEventListener("change",async e=>{
-const cb=e.target.closest("[data-toggle]");if(!cb)return;
-const t=tasks.find(x=>x.id===cb.dataset.toggle);if(!t)return;
-if(user)await updateDoc(doc(db,"users",user.uid,"tasks",t.id),{done:cb.checked});else{t.done=cb.checked;render();}
+ const cb=e.target.closest("[data-toggle]");if(!cb)return;
+ const t=tasks.find(x=>x.id===cb.dataset.toggle);if(!t)return;
+ if(user)await updateDoc(doc(db,"users",user.uid,"tasks",t.id),{done:cb.checked});
+ else{t.done=cb.checked;render()}
 });
-
 $("goalList").addEventListener("change",e=>{
-const cb=e.target.closest("[data-goal]");if(!cb)return;
-const g=goals.find(x=>x.id===cb.dataset.goal);if(g){g.done=cb.checked;render();}
+ const cb=e.target.closest("[data-goal]");if(!cb)return;
+ const g=goals.find(x=>x.id===cb.dataset.goal);if(g){g.done=cb.checked;render()}
 });
-
 $("loginBtn").addEventListener("click",async()=>{
-if(user){await signOut(auth);return;}
-try{await signInWithPopup(auth,new GoogleAuthProvider());}catch(err){alert("Sign-in failed: "+err.message);}
+ if(user){await signOut(auth);return}
+ try{await signInWithPopup(auth,new GoogleAuthProvider())}catch(err){alert("Sign-in failed: "+err.message)}
 });
 
 if(firebaseConfig.apiKey.startsWith("PASTE_")){
-$("syncStatus").textContent="Firebase: add your Firebase config in index.html";
-tasks=demoTasks.map((x,i)=>({...x,id:"demo-"+i}));
-render();
+ $("syncStatus").textContent="Firebase: add your Firebase config in index.html";
+ tasks=demoTasks.map((x,i)=>({...x,id:"demo-"+i}));
+ render();
 }else{
-try{
-const app=initializeApp(firebaseConfig);auth=getAuth(app);db=getFirestore(app);
-onAuthStateChanged(auth,u=>{
-user=u;$("loginBtn").textContent=u?"Sign out":"Sign in";
-$("syncStatus").textContent=u?`Firebase: connected as ${u.email||"user"}`:"Firebase: sign in to sync";
-$("syncStatus").className="status "+(u?"online":"offline");
-if(unsubscribeTasks)unsubscribeTasks();
-if(u){
-const q=query(collection(db,"users",u.uid,"tasks"),orderBy("createdAt","desc"));
-unsubscribeTasks=onSnapshot(q,snap=>{tasks=snap.docs.map(d=>({id:d.id,...d.data()}));render();},err=>console.error(err));
-}else{tasks=demoTasks.map((x,i)=>({...x,id:"demo-"+i}));render();}
-});
-}catch(err){console.error(err);$("syncStatus").textContent="Firebase: configuration error";tasks=demoTasks.map((x,i)=>({...x,id:"demo-"+i}));render();}
-}
-</script>
+ try{
+  const app=initializeApp(firebaseConfig);auth=getAuth(app);db=getFirestore(app);
+  onAuthStateChanged(auth,u=>{
+   user=u;$("loginBtn").textContent=u?"Sign out":"Sign in";
+   $("syncStatus").textContent=u?`Firebase: connected as ${u.email||"user"}`:"Firebase: sign in to sync";
+   $("syncStatus").className="status "+(u?"online":"offline");
+   if(unsubscribeTasks)unsubscribeTasks();
+   if(u){
+    const q=query(collection(db,"users",u.uid,"tasks"),orderBy("createdAt","desc"));
+    unsubscribeTasks=onSnapshot(q,snap=>{tasks=snap.docs.map(d=>({id:d.id,...d.data()}));render()},err=>console.error(err));
+   }else{tasks=demoTasks.map((x,i)=>({...x,id:"demo-"+i}));render()}
+  });
+ }catch(err){console.error(err);$("syncStatus").textContent="Firebase: configuration error";tasks=demoTasks.map((x,i)=>({...x,id:"demo-"+i}));render()}
+}</script>
 </body>
 </html>
