@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Daily Work Organizer</title>
+<style>
+:root{--bg:#f5f7fb;--card:#fff;--text:#172033;--muted:#6b7280;--border:#e5e7eb;--accent:#4f46e5;--danger:#dc2626;--success:#16a34a}
+*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--text)}
+button,input,select{font:inherit}button{cursor:pointer}.app{max-width:1250px;margin:auto;padding:24px}
+.top{display:flex;justify-content:space-between;gap:16px;align-items:center;margin-bottom:24px}
+h1,h2,h3,p{margin:0}.muted{color:var(--muted)}.small{font-size:12px}.actions{display:flex;gap:8px;flex-wrap:wrap}
+.btn{border:1px solid var(--border);background:var(--card);padding:9px 13px;border-radius:9px}.btn.primary{background:var(--accent);border-color:var(--accent);color:white}.btn.danger{color:var(--danger)}
+.grid{display:grid;gap:14px}.stats{grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:18px}.layout{grid-template-columns:1.4fr .9fr}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:17px}.stat-value{font-size:25px;font-weight:700;margin-top:5px}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}.input,.select{border:1px solid var(--border);background:var(--card);padding:10px 11px;border-radius:9px;outline:none}.input:focus,.select:focus{border-color:var(--accent)}
+.task{display:grid;grid-template-columns:auto 1fr auto auto;gap:11px;align-items:center;padding:13px 4px;border-bottom:1px solid var(--border)}.task:last-child{border-bottom:0}
+.task.done .title{text-decoration:line-through;color:var(--muted)}.title{font-weight:600}.meta{display:flex;gap:7px;flex-wrap:wrap;margin-top:5px}
+.pill{font-size:11px;border:1px solid var(--border);border-radius:99px;padding:3px 8px;color:var(--muted)}.high{color:#b91c1c;border-color:#fecaca}.medium{color:#a16207;border-color:#fde68a}.low{color:#4b5563}
+.progress{height:9px;background:#eef0f4;border-radius:99px;overflow:hidden;margin:10px 0}.progress>span{display:block;height:100%;background:var(--accent);transition:.25s}
+.empty{text-align:center;padding:28px;color:var(--muted)}.goal{padding:12px 0;border-bottom:1px solid var(--border)}.goal:last-child{border-bottom:0}
+.goal-row{display:flex;gap:10px;align-items:center}.goal-row span:first-of-type{flex:1}.checkbox{width:18px;height:18px}
+.modal{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;padding:18px}.modal.open{display:flex}
+.modal-box{background:white;border-radius:14px;padding:20px;width:min(520px,100%)}.form{display:grid;gap:12px;margin-top:15px}.form label{font-size:13px;font-weight:600}.form input,.form select{width:100%;margin-top:5px}
+.status{font-size:12px}.online{color:var(--success)}.offline{color:var(--danger)}
+@media(max-width:850px){.stats{grid-template-columns:repeat(2,1fr)}.layout{grid-template-columns:1fr}}
+@media(max-width:520px){.app{padding:14px}.stats{grid-template-columns:1fr 1fr}.task{grid-template-columns:auto 1fr auto}.task .delete{grid-column:2}.top{align-items:flex-start;flex-direction:column}}
+</style>
+</head>
+<body>
+<div class="app">
+<header class="top">
+<div>
+<h1>Daily Work Organizer</h1>
+<p class="muted">Tasks, projects, priorities, and monthly progress in one place.</p>
+<div id="syncStatus" class="status offline">Firebase: not connected</div>
+</div>
+<div class="actions">
+<button class="btn" id="loginBtn">Sign in</button>
+<button class="btn primary" id="addBtn">+ Add task</button>
+</div>
+</header>
+
+<section class="grid stats">
+<div class="card"><div class="small muted">TODAY</div><div class="stat-value" id="todayStat">0 / 0</div><div class="small muted">tasks completed</div></div>
+<div class="card"><div class="small muted">MONTH</div><div class="stat-value" id="monthStat">0%</div><div class="small muted">milestones completed</div></div>
+<div class="card"><div class="small muted">OVERDUE</div><div class="stat-value" id="overdueStat">0</div><div class="small muted">tasks need attention</div></div>
+<div class="card"><div class="small muted">FOCUS</div><div class="stat-value" id="focusStat">Support</div><div class="small muted">current workstream</div></div>
+</section>
+
+<main class="grid layout">
+<section class="card">
+<div style="display:flex;justify-content:space-between;gap:10px;align-items:end">
+<div><h2>Today</h2><p class="small muted" id="dateLabel"></p></div>
+<select class="select" id="projectFilter">
+<option value="all">All projects</option><option>Support</option><option>Keeper</option><option>Intune</option><option>OpenDental</option><option>Projects</option>
+</select>
+</div>
+<div class="progress"><span id="dayProgress" style="width:0%"></span></div>
+<div id="taskList"></div>
+</section>
+
+<aside class="card">
+<h2>Monthly Organizer</h2>
+<p class="small muted">Big outcomes, not vague promises to your future self.</p>
+<div class="progress"><span id="monthProgress" style="width:0%"></span></div>
+<div id="goalList"></div>
+</aside>
+</main>
+
+<section class="card" style="margin-top:14px">
+<h2>Workstreams</h2>
+<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(210px,1fr));margin-top:12px">
+<div><b>🔐 Keeper</b><p class="small muted">Roles, teams, folders and credential ownership.</p></div>
+<div><b>🛡️ Microsoft</b><p class="small muted">Intune, Entra, Purview and DLP.</p></div>
+<div><b>🦷 Dental Systems</b><p class="small muted">OpenDental, imaging, Weave and PBN.</p></div>
+<div><b>⚙️ Automation</b><p class="small muted">Remove repetitive manual work.</p></div>
+</div>
+</section>
+</div>
+
+<div class="modal" id="modal">
+<div class="modal-box">
+<h2>Add task</h2>
+<form class="form" id="taskForm">
+<label>Task<input class="input" id="taskTitle" required placeholder="e.g. Review Keeper HR permissions"></label>
+<label>Project<select class="select" id="taskProject"><option>Support</option><option>Keeper</option><option>Intune</option><option>OpenDental</option><option>Projects</option></select></label>
+<label>Priority<select class="select" id="taskPriority"><option>High</option><option selected>Medium</option><option>Low</option></select></label>
+<label>Due date<input class="input" id="taskDue" type="date"></label>
+<div class="actions"><button type="button" class="btn" id="cancelBtn">Cancel</button><button class="btn primary" type="submit">Create task</button></div>
+</form>
+</div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
+import { getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+
+const firebaseConfig={
+apiKey:"PASTE_YOUR_API_KEY",
+authDomain:"PASTE_YOUR_PROJECT.firebaseapp.com",
+projectId:"PASTE_YOUR_PROJECT_ID",
+storageBucket:"PASTE_YOUR_STORAGE_BUCKET",
+messagingSenderId:"PASTE_YOUR_MESSAGING_SENDER_ID",
+appId:"PASTE_YOUR_APP_ID"
+};
+
+const demoTasks=[
+{title:"Review urgent support tickets",project:"Support",priority:"High",dueDate:"",done:false},
+{title:"Check Keeper role and team permissions",project:"Keeper",priority:"High",dueDate:"",done:false},
+{title:"Continue Keeper folder structure",project:"Keeper",priority:"High",dueDate:"",done:false},
+{title:"Review Intune enrollment / device issues",project:"Intune",priority:"High",dueDate:"",done:false},
+{title:"Check OpenDental pending issues",project:"OpenDental",priority:"Medium",dueDate:"",done:false},
+{title:"Follow up on imaging / IRIS installations",project:"OpenDental",priority:"Medium",dueDate:"",done:false},
+{title:"Document one recurring IT process",project:"Projects",priority:"Medium",dueDate:"",done:false},
+{title:"End-of-shift review and tomorrow list",project:"Support",priority:"Low",dueDate:"",done:false}
+];
+
+const monthlyGoals=[
+"Finalize Keeper organization structure",
+"Complete October Intune cleanup",
+"Standardize Purview / DLP documentation",
+"Review OpenDental and imaging outstanding items",
+"Document recurring IT support procedures",
+"Automate one repetitive workflow",
+"Complete monthly asset / access review",
+"Review office onboarding checklist",
+"Clean up unresolved vendor follow-ups",
+"Update IT project tracker",
+"Review security exceptions",
+"October monthly review"
+];
+
+let auth,db,user=null,unsubscribeTasks=null,tasks=[],goals=monthlyGoals.map((title,i)=>({id:"goal-"+i,title,done:false}));
+const $=id=>document.getElementById(id);
+const today=()=>new Date().toISOString().slice(0,10);
+$("dateLabel").textContent=new Date().toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric",year:"numeric"});
+
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));}
+
+function render(){
+const filter=$("projectFilter").value;
+const visible=tasks.filter(t=>filter==="all"||t.project===filter);
+$("taskList").innerHTML=visible.length?visible.map(t=>`
+<div class="task ${t.done?"done":""}">
+<input class="checkbox" type="checkbox" data-toggle="${t.id}" ${t.done?"checked":""}>
+<div><div class="title">${escapeHtml(t.title)}</div>
+<div class="meta"><span class="pill">${escapeHtml(t.project)}</span><span class="pill ${t.priority.toLowerCase()}">${escapeHtml(t.priority)}</span>${t.dueDate?`<span class="pill">Due ${escapeHtml(t.dueDate)}</span>`:""}</div></div>
+<button class="btn small" data-edit="${t.id}" type="button">Edit</button>
+<button class="btn danger small delete" data-delete="${t.id}" type="button">Delete</button>
+</div>`).join(""):`<div class="empty">No tasks here. Suspiciously peaceful.</div>`;
+
+$("goalList").innerHTML=goals.map(g=>`
+<label class="goal goal-row"><input class="checkbox" type="checkbox" data-goal="${g.id}" ${g.done?"checked":""}>
+<span class="${g.done?"title":""}">${escapeHtml(g.title)}</span><span class="pill">${g.done?"Done":"Open"}</span></label>`).join("");
+
+const done=tasks.filter(t=>t.done).length,total=tasks.length,gd=goals.filter(g=>g.done).length;
+$("todayStat").textContent=`${done} / ${total}`;
+$("dayProgress").style.width=total?`${done/total*100}%`:"0%";
+$("monthStat").textContent=`${goals.length?Math.round(gd/goals.length*100):0}%`;
+$("monthProgress").style.width=`${goals.length?gd/goals.length*100:0}%`;
+$("overdueStat").textContent=tasks.filter(t=>!t.done&&t.dueDate&&t.dueDate<today()).length;
+$("focusStat").textContent=tasks.find(t=>!t.done)?.project||"Done";
+}
+
+$("projectFilter").addEventListener("change",render);
+$("addBtn").addEventListener("click",()=>{$("modal").classList.add("open");$("taskTitle").focus();});
+$("cancelBtn").addEventListener("click",()=>{$("modal").classList.remove("open");});
+$("modal").addEventListener("click",e=>{if(e.target===$("modal"))$("modal").classList.remove("open");});
+
+$("taskForm").addEventListener("submit",async e=>{
+e.preventDefault();
+const task={title:$("taskTitle").value.trim(),project:$("taskProject").value,priority:$("taskPriority").value,dueDate:$("taskDue").value,done:false};
+if(!task.title)return;
+if(user)await addDoc(collection(db,"users",user.uid,"tasks"),{...task,createdAt:serverTimestamp()});
+else{task.id=crypto.randomUUID();tasks.push(task);render();}
+e.target.reset();$("modal").classList.remove("open");
+});
+
+$("taskList").addEventListener("click",async e=>{
+const del=e.target.closest("[data-delete]"),edit=e.target.closest("[data-edit]");
+if(del){const id=del.dataset.delete;if(user)await deleteDoc(doc(db,"users",user.uid,"tasks",id));else{tasks=tasks.filter(t=>t.id!==id);render();}}
+if(edit){const t=tasks.find(x=>x.id===edit.dataset.edit);if(!t)return;const title=prompt("Task name:",t.title);if(title===null||!title.trim())return;if(user)await updateDoc(doc(db,"users",user.uid,"tasks",t.id),{title:title.trim()});else{t.title=title.trim();render();}}
+});
+
+$("taskList").addEventListener("change",async e=>{
+const cb=e.target.closest("[data-toggle]");if(!cb)return;
+const t=tasks.find(x=>x.id===cb.dataset.toggle);if(!t)return;
+if(user)await updateDoc(doc(db,"users",user.uid,"tasks",t.id),{done:cb.checked});else{t.done=cb.checked;render();}
+});
+
+$("goalList").addEventListener("change",e=>{
+const cb=e.target.closest("[data-goal]");if(!cb)return;
+const g=goals.find(x=>x.id===cb.dataset.goal);if(g){g.done=cb.checked;render();}
+});
+
+$("loginBtn").addEventListener("click",async()=>{
+if(user){await signOut(auth);return;}
+try{await signInWithPopup(auth,new GoogleAuthProvider());}catch(err){alert("Sign-in failed: "+err.message);}
+});
+
+if(firebaseConfig.apiKey.startsWith("PASTE_")){
+$("syncStatus").textContent="Firebase: add your Firebase config in index.html";
+tasks=demoTasks.map((x,i)=>({...x,id:"demo-"+i}));
+render();
+}else{
+try{
+const app=initializeApp(firebaseConfig);auth=getAuth(app);db=getFirestore(app);
+onAuthStateChanged(auth,u=>{
+user=u;$("loginBtn").textContent=u?"Sign out":"Sign in";
+$("syncStatus").textContent=u?`Firebase: connected as ${u.email||"user"}`:"Firebase: sign in to sync";
+$("syncStatus").className="status "+(u?"online":"offline");
+if(unsubscribeTasks)unsubscribeTasks();
+if(u){
+const q=query(collection(db,"users",u.uid,"tasks"),orderBy("createdAt","desc"));
+unsubscribeTasks=onSnapshot(q,snap=>{tasks=snap.docs.map(d=>({id:d.id,...d.data()}));render();},err=>console.error(err));
+}else{tasks=demoTasks.map((x,i)=>({...x,id:"demo-"+i}));render();}
+});
+}catch(err){console.error(err);$("syncStatus").textContent="Firebase: configuration error";tasks=demoTasks.map((x,i)=>({...x,id:"demo-"+i}));render();}
+}
+</script>
+</body>
+</html>
